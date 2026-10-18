@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mock CPMS</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    table { font-size: 0.85rem; }
+    .ok { color: var(--pico-ins-color); }
+    .bad { color: var(--pico-del-color); }
+    .verdict { font-size: 2rem; font-weight: bold; }
+    pre { white-space: pre-wrap; word-break: break-all; font-size: 0.75rem; max-height: 24rem; }
+    tr.message { cursor: pointer; }
+  </style>
+</head>
+<body>
+<main class="container" x-data="mock()" x-init="init()">
+  <nav>
+    <ul><li><strong>Mock CPMS</strong> <small>(OCPI 2.2.1 CPO, <span x-text="`${s.country_code}-${s.party_id}`"></span>)</small></li></ul>
+    <ul><li :class="s.registered_at ? 'ok' : 'bad'" x-text="s.registered_at ? 'Registered with eMSP' : 'Not registered'"></li></ul>
+  </nav>
+  <p x-show="error" class="bad" @click="error = ''" x-text="error"></p>
+
+  <div class="grid">
+    <article>
+      <header><strong>1. Register</strong></header>
+      <template x-if="!s.registered_at">
+        <div>
+          <p><strong>Option A: the eMSP connects to us.</strong> In OCPI Tokens, go to Partners, then "We connect to the CPMS", and enter:</p>
+          <label>Versions URL <input readonly :value="s.versions_url"></label>
+          <label>Token A <input readonly :value="s.token_a ?? '(none, issue a new one)'"></label>
+          <button class="secondary" @click="call('POST', '/mock/token-a')">Issue new token A</button>
+          <hr>
+          <p><strong>Option B: we connect to the eMSP.</strong> Paste in the token A that OCPI Tokens issued:</p>
+          <form @submit.prevent="call('POST', '/mock/connect', connectForm)">
+            <input placeholder="eMSP versions URL" x-model="connectForm.versions_url" required>
+            <input placeholder="Token A from the eMSP" x-model="connectForm.token" required>
+            <button>Connect</button>
+          </form>
+        </div>
+      </template>
+      <template x-if="s.registered_at">
+        <div>
+          <p>Registered at <span x-text="s.registered_at"></span></p>
+          <p>eMSP versions URL: <code x-text="s.their_versions_url"></code></p>
+          <p>Their endpoints: <span x-text="s.endpoints.map(e => `${e.identifier} (${e.role})`).join(', ')"></span></p>
+          <p>Our token (they use it): <code x-text="s.our_token"></code><br>Their token (we use it): <code x-text="s.their_token"></code></p>
+          <div role="group">
+            <button class="secondary" @click="call('POST', '/mock/rotate')">Rotate credentials</button>
+            <button class="secondary" @click="call('POST', '/mock/unregister')">Unregister</button>
+          </div>
+        </div>
+      </template>
+    </article>
+
+    <article>
+      <header><strong>2. Authorize a token</strong></header>
+      <p>This is what the CPMS sends when a charger reports an RFID it doesn't know.</p>
+      <form @submit.prevent="authorize()">
+        <div class="grid">
+          <input placeholder="Token UID" x-model="auth.uid" required>
+          <select x-model="auth.type"><template x-for="t in ['RFID', 'APP_USER', 'AD_HOC_USER', 'OTHER']"><option x-text="t"></option></template></select>
+        </div>
+        <input placeholder="Location ID (optional)" x-model="auth.location_id">
+        <label><input type="checkbox" x-model="auth.bad_token"> Send an invalid token (expect a 401)</label>
+        <button :disabled="!s.registered_at && !auth.bad_token">Send authorize</button>
+      </form>
+      <template x-if="authResult">
+        <div>
+          <p class="verdict" :class="authResult.body?.data?.allowed === 'ALLOWED' ? 'ok' : 'bad'"
+             x-text="authResult.body?.data?.allowed ?? `${authResult.http_status} / ${authResult.body?.status_code ?? ''} ${authResult.body?.status_message ?? ''}`"></p>
+          <pre x-text="JSON.stringify(authResult, null, 2)"></pre>
+        </div>
+      </template>
+      <hr>
+      <button class="secondary" :disabled="!s.registered_at" @click="pullTokens()">Pull token list (first 10)</button>
+      <pre x-show="tokensResult" x-text="JSON.stringify(tokensResult, null, 2)"></pre>
+    </article>
+  </div>
+
+  <section>
+    <h3>Mock log <small><a href="#" @click.prevent="clearLog()">clear</a></small></h3>
+    <div class="overflow-auto">
+      <table>
+        <thead><tr><th>Time</th><th>Dir</th><th>Request</th><th>HTTP</th><th>OCPI</th><th>ms</th></tr></thead>
+        <tbody>
+          <template x-for="m in log" :key="m.id">
+            <tr class="message" @click="selected = selected?.id === m.id ? null : m">
+              <td x-text="m.time.slice(11, 19)"></td>
+              <td x-text="m.direction === 'IN' ? '← IN' : '→ OUT'"></td>
+              <td x-text="`${m.method} ${m.url}`"></td>
+              <td :class="m.http_status && m.http_status < 400 ? 'ok' : 'bad'" x-text="m.http_status ?? 'error'"></td>
+              <td :class="m.ocpi_status === 1000 ? 'ok' : 'bad'" x-text="m.ocpi_status ?? ''"></td>
+              <td x-text="m.duration_ms"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <article x-show="selected">
+      <template x-if="selected">
+        <div>
+          <h6>Request headers</h6><pre x-text="JSON.stringify(selected.request_headers, null, 2)"></pre>
+          <h6>Request body</h6><pre x-text="pretty(selected.request_body) || '(empty)'"></pre>
+          <h6>Response</h6><pre x-text="pretty(selected.response_body) || '(empty)'"></pre>
+        </div>
+      </template>
+    </article>
+  </section>
+</main>
+
+<script>
+function mock() {
+  return {
+    s: { endpoints: [] }, error: '', log: [], selected: null,
+    connectForm: { versions_url: '', token: '' },
+    auth: { uid: '', type: 'RFID', location_id: '', bad_token: false }, authResult: null, tokensResult: null,
+
+    async init() {
+      await this.refresh();
+      this.connectForm.versions_url = this.s.emsp_versions_url;
+      setInterval(() => this.refresh(), 1500);
+    },
+    async api(method, path, body) {
+      const res = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+      const json = res.status === 204 ? null : await res.json().catch(() => null);
+      if (!res.ok) {
+        this.error = typeof json?.detail === 'string' ? json.detail : JSON.stringify(json?.detail ?? res.statusText);
+        throw new Error(this.error);
+      }
+      return json;
+    },
+    async refresh() {
+      this.s = await this.api('GET', '/mock/state');
+      this.log = await this.api('GET', '/mock/log');
+    },
+    async call(method, path, body) {
+      this.error = '';
+      this.s = await this.api(method, path, body);
+    },
+    async authorize() {
+      this.error = '';
+      this.authResult = await this.api('POST', '/mock/authorize', { ...this.auth, location_id: this.auth.location_id || null });
+    },
+    async pullTokens() { this.tokensResult = await this.api('GET', '/mock/tokens'); },
+    async clearLog() { await this.api('DELETE', '/mock/log'); this.selected = null; },
+    pretty(v) {
+      if (!v) return '';
+      try { return JSON.stringify(JSON.parse(v), null, 2); } catch { return v; }
+    },
+  };
+}
+</script>
+</body>
+</html>

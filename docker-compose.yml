@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ocpi
+      POSTGRES_PASSWORD: ocpi
+      POSTGRES_DB: ocpi
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocpi"]
+      interval: 2s
+      retries: 15
+  app:
+    build: .
+    env_file: [.env.example]
+    environment:
+      DATABASE_URL: postgresql+psycopg://ocpi:ocpi@db:5432/ocpi
+      BASE_URL: http://app:8000  # how the mock CPMS container reaches us
+    ports: ["8000:8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+  mock-cpms:
+    build: .
+    command: ["uvicorn", "mock_cpms.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      MOCK_BASE_URL: http://mock-cpms:8001  # how the app container reaches the mock
+      MOCK_EMSP_VERSIONS_URL: http://app:8000/ocpi/versions
+    ports: ["8001:8001"]
+volumes:
+  pgdata: {}

@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OCPI Tokens</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    table { font-size: 0.85rem; }
+    .ok { color: var(--pico-ins-color); }
+    .bad { color: var(--pico-del-color); }
+    pre { white-space: pre-wrap; word-break: break-all; font-size: 0.75rem; max-height: 24rem; }
+    tr.message { cursor: pointer; }
+    [x-cloak] { display: none !important; }
+    .help { position: relative; }
+    .help > a {
+      display: inline-block; width: 1.2rem; height: 1.2rem; line-height: 1.1rem; margin-left: 0.25rem;
+      text-align: center; font-size: 0.75rem; text-decoration: none; border: 1px solid currentColor; border-radius: 50%;
+    }
+    .help .popup {
+      position: absolute; z-index: 10; top: 1.6rem; left: 0; width: min(24rem, 70vw); padding: 0.75rem;
+      font-weight: normal; background: var(--pico-card-background-color); border: 1px solid var(--pico-muted-border-color);
+      border-radius: var(--pico-border-radius); box-shadow: var(--pico-card-box-shadow);
+    }
+  </style>
+</head>
+<body>
+<main class="container" x-data="app()" x-init="init()">
+  <nav>
+    <ul><li><strong>OCPI Tokens</strong></li></ul>
+    <ul>
+      <li><a href="#" @click.prevent="tab = 'tokens'" :aria-current="tab === 'tokens' && 'page'">Tokens</a></li>
+      <li><a href="#" @click.prevent="tab = 'partners'; loadPartners()" :aria-current="tab === 'partners' && 'page'">Partners</a></li>
+      <li><a href="#" @click.prevent="tab = 'log'" :aria-current="tab === 'log' && 'page'">Live log</a></li>
+    </ul>
+  </nav>
+  <p x-show="error" class="bad" @click="error = ''" x-text="error"></p>
+
+  <!-- Tokens -->
+  <section x-show="tab === 'tokens'">
+    <div class="grid">
+      <input type="search" placeholder="Search UID, contract or visual number" x-model="filters.q" @input.debounce.300ms="search()">
+      <select x-model="filters.type" @change="search()">
+        <option value="">All types</option>
+        <template x-for="t in types"><option x-text="t"></option></template>
+      </select>
+      <select x-model="filters.group_id" @change="search()">
+        <option value="">All groups</option>
+        <template x-for="g in groups"><option x-text="g"></option></template>
+      </select>
+      <select x-model="filters.valid" @change="search()">
+        <option value="">Valid + invalid</option>
+        <option value="true">Valid</option>
+        <option value="false">Invalid</option>
+      </select>
+      <button @click="edit()">New token</button>
+    </div>
+
+    <div class="overflow-auto">
+      <table class="striped">
+        <thead>
+          <tr><th>UID</th><th>Type</th><th>Contract</th><th>Visual no.</th><th>Group</th><th>Whitelist</th><th>Valid</th><th>Updated</th><th></th></tr>
+        </thead>
+        <tbody>
+          <template x-for="t in tokens" :key="t.id">
+            <tr>
+              <td x-text="t.uid"></td>
+              <td x-text="t.type"></td>
+              <td x-text="t.contract_id"></td>
+              <td x-text="t.visual_number ?? ''"></td>
+              <td x-text="t.group_id ?? ''"></td>
+              <td x-text="t.whitelist"></td>
+              <td><input type="checkbox" role="switch" :checked="t.valid" @change="toggle(t)"></td>
+              <td x-text="new Date(t.last_updated).toLocaleString()"></td>
+              <td><a href="#" @click.prevent="edit(t)">Edit</a> · <a href="#" @click.prevent="remove(t)">Delete</a></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid">
+      <span x-text="total ? `${offset + 1}–${Math.min(offset + limit, total)} of ${total}` : 'No tokens'"></span>
+      <div role="group">
+        <button class="secondary" :disabled="offset === 0" @click="page(-1)">Previous</button>
+        <button class="secondary" :disabled="offset + limit >= total" @click="page(1)">Next</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Partners -->
+  <section x-show="tab === 'partners'">
+    <div class="grid">
+      <article>
+        <header><strong>The CPMS connects to us</strong></header>
+        <p>Create a partner to get a token A. Give the CPMS that token and our versions URL:
+          <code x-text="info.versions_url"></code></p>
+        <form @submit.prevent="addPartner()" role="group">
+          <input placeholder="Partner name" x-model="newPartner" required>
+          <button>Issue token A</button>
+        </form>
+      </article>
+      <article>
+        <header><strong>We connect to the CPMS</strong></header>
+        <form @submit.prevent="connect()">
+          <input placeholder="Partner name" x-model="connectForm.name" required>
+          <input placeholder="Their versions URL" x-model="connectForm.versions_url" type="url" required>
+          <input placeholder="Token A they gave us" x-model="connectForm.token" required>
+          <button :aria-busy="busy" :disabled="busy">Connect</button>
+        </form>
+      </article>
+    </div>
+
+    <div class="overflow-auto">
+      <table>
+        <thead><tr><th>Name</th><th>Status</th><th>Token A</th><th>Their versions URL</th><th>Their endpoints</th><th></th></tr></thead>
+        <tbody>
+          <template x-for="p in partners" :key="p.id">
+            <tr>
+              <td x-text="p.name"></td>
+              <td :class="p.registered_at ? 'ok' : ''" x-text="p.registered_at ? 'Registered' : 'Not registered'"></td>
+              <td><code x-text="p.token_a ?? '—'"></code></td>
+              <td x-text="p.versions_url ?? '—'"></td>
+              <td x-text="(p.endpoints ?? []).map(e => e.identifier).filter((v, i, a) => a.indexOf(v) === i).join(', ') || '—'"></td>
+              <td>
+                <a href="#" @click.prevent="partnerAction(p, 'test')">Test</a>
+                <template x-if="!p.registered_at && p.their_token_set"><span> · <a href="#" @click.prevent="partnerAction(p, 'register')">Register</a></span></template>
+                <template x-if="p.registered_at"><span> · <a href="#" @click.prevent="partnerAction(p, 'rotate')">Rotate</a></span></template>
+                · <a href="#" @click.prevent="removePartner(p)">Delete</a>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <p x-show="result" :class="result?.ok ? 'ok' : 'bad'" x-text="result?.detail"></p>
+
+    <article>
+      <header><strong>Test authorize</strong></header>
+      <p>This sends a real authorize request to our own <code>/ocpi</code> endpoint, using a registered partner's
+        token. It's the same call the CPMS makes. The request appears in the live log.</p>
+      <form @submit.prevent="testAuthorize()" class="grid">
+        <select x-model="authTest.partner_id" required>
+          <option value="">Partner…</option>
+          <template x-for="p in partners.filter(p => p.registered_at)"><option :value="p.id" x-text="p.name"></option></template>
+        </select>
+        <input placeholder="Token UID" x-model="authTest.uid" required>
+        <select x-model="authTest.type"><template x-for="t in types"><option x-text="t"></option></template></select>
+        <button>Authorize</button>
+      </form>
+      <pre x-show="authResult" x-text="authResult"></pre>
+    </article>
+  </section>
+
+  <!-- Live log -->
+  <section x-show="tab === 'log'">
+    <div class="grid">
+      <label><input type="checkbox" role="switch" x-model="paused"> Pause</label>
+      <select x-model="logPartner" @change="reloadMessages()">
+        <option value="">All partners</option>
+        <template x-for="p in partners"><option :value="p.id" x-text="p.name"></option></template>
+      </select>
+      <button class="secondary" @click="clearMessages()">Clear log</button>
+    </div>
+    <div class="overflow-auto">
+      <table>
+        <thead><tr><th>Time</th><th>Dir</th><th>Partner</th><th>Request</th><th>HTTP</th><th>OCPI</th><th>ms</th></tr></thead>
+        <tbody>
+          <template x-for="m in messages" :key="m.id">
+            <tr class="message" @click="selected = selected?.id === m.id ? null : m">
+              <td x-text="new Date(m.created_at).toLocaleTimeString()"></td>
+              <td x-text="m.direction === 'IN' ? '← IN' : '→ OUT'"></td>
+              <td x-text="partnerName(m.partner_id)"></td>
+              <td x-text="`${m.method} ${path(m.url)}`"></td>
+              <td :class="m.http_status && m.http_status < 400 ? 'ok' : 'bad'" x-text="m.http_status ?? 'error'"></td>
+              <td :class="m.ocpi_status === 1000 ? 'ok' : 'bad'" x-text="m.ocpi_status ?? ''"></td>
+              <td x-text="m.duration_ms"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <article x-show="selected">
+      <template x-if="selected">
+        <div>
+          <header><strong x-text="`${selected.direction} ${selected.method} ${selected.url}`"></strong></header>
+          <h6>Request headers</h6><pre x-text="pretty(selected.request_headers)"></pre>
+          <h6>Request body</h6><pre x-text="pretty(selected.request_body) || '(empty)'"></pre>
+          <h6>Response</h6><pre x-text="pretty(selected.response_body) || '(empty)'"></pre>
+        </div>
+      </template>
+    </article>
+  </section>
+
+  <dialog x-ref="dialog">
+    <article x-show="form">
+      <template x-if="form">
+        <form @submit.prevent="save()">
+          <h3 x-text="form.id ? 'Edit token' : 'New token'"></h3>
+          <label>UID <span class="help" x-data="help('uid')" @click.outside="open = false"><a href="#" @click.prevent="open = !open" aria-label="What is this field?">?</a><small class="popup" x-show="open" x-cloak><span x-text="text" @click.prevent></span> <a :href="url" target="_blank" rel="noopener">OCPI 2.2.1 spec ↗</a></small></span> <input x-model="form.uid" required maxlength="36"></label>
+          <label>Type <span class="help" x-data="help('type')" @click.outside="open = false"><a href="#" @click.prevent="open = !open" aria-label="What is this field?">?</a><small class="popup" x-show="open" x-cloak><span x-text="text" @click.prevent></span> <a :href="url" target="_blank" rel="noopener">OCPI 2.2.1 spec ↗</a></small></span>
+            <select x-model="form.type"><template x-for="t in types"><option x-text="t"></option></template></select>
+          </label>
+          <label>Contract ID <span class="help" x-data="help('contract_id')" @click.outside="open = false"><a href="#" @click.prevent="open = !open" aria-label="What is this field?">?</a><small class="popup" x-show="open" x-cloak><span x-text="text" @click.prevent></span> <a :href="url" target="_blank" rel="noopener">OCPI 2.2.1 spec ↗</a></small></span> <input x-model="form.contract_id" required maxlength="36"></label>
+          <label>Visual number <span class="help" x-data="help('visual_number')" @click.outside="open = false"><a href="#" @click.prevent="open = !open" aria-label="What is this field?">?</a><small class="popup" x-show="open" x-cloak><span x-text="text" @click.prevent></span> <a :href="url" target="_blank" rel="noopener">OCPI 2.2.1 spec ↗</a></small></span> <input x-model="form.visual_number" maxlength="64"></label>
+          <label>Group <span class="help" x-data="help('group_id')" @click.outside="open = false"><a href="#" @click.prevent="open = !open" aria-label="What is this field?">?</a><small class="popup" x-show="open" x-cloak><span x-text="text" @click.prevent></span> <a :href="url" target="_blank" rel="noopener">OCPI 2.2.1 spec ↗</a></small></span> <input x-model="form.group_id" maxlength="36" list="groups"></label>
+          <datalist id="groups"><template x-for="g in groups"><option :value="g"></option></template></datalist>
+          <label>Whitelist <span class="help" x-data="help('whitelist')" @click.outside="open = false"><a href="#" @click.prevent="open = !open" aria-label="What is this field?">?</a><small class="popup" x-show="open" x-cloak><span x-text="text" @click.prevent></span> <a :href="url" target="_blank" rel="noopener">OCPI 2.2.1 spec ↗</a></small></span>
+            <select x-model="form.whitelist"><template x-for="w in whitelists"><option x-text="w"></option></template></select>
+          </label>
+          <label><input type="checkbox" role="switch" x-model="form.valid"> Valid <span class="help" x-data="help('valid')" @click.outside="open = false"><a href="#" @click.prevent="open = !open" aria-label="What is this field?">?</a><small class="popup" x-show="open" x-cloak><span x-text="text" @click.prevent></span> <a :href="url" target="_blank" rel="noopener">OCPI 2.2.1 spec ↗</a></small></span></label>
+          <footer>
+            <button type="button" class="secondary" @click="$refs.dialog.close()">Cancel</button>
+            <button type="submit">Save</button>
+          </footer>
+        </form>
+      </template>
+    </article>
+  </dialog>
+</main>
+
+<script>
+// Field help for the token form. Each entry is the OCPI 2.2.1 Token object definition, paraphrased, plus its section in the spec.
+const SPEC = 'https://github.com/ocpi/ocpi/blob/2.2.1/mod_tokens.asciidoc';
+const FIELD_HELP = {
+  uid: ["OCPI Token.uid: the ID the charger sends when the token is presented. For RFID, this is the card's hidden ID as read by the reader. Together with type, it uniquely identifies the token. CiString(36), case-insensitive.", '#mod_tokens_token_object'],
+  type: ['OCPI Token.type (TokenType). RFID: a physical card or key fob. APP_USER: an ID generated by an app, the same for every session. AD_HOC_USER: a one-time ID generated by a server or app. OTHER: anything else. The CPMS includes the type in the authorize request.', '#mod_tokens_tokentype_enum'],
+  contract_id: ["OCPI Token.contract_id: identifies the driver's contract within the eMSP's platform. The spec recommends the eMI3 eMA ID format, e.g. GB-XXX-C12345678-X. CiString(36).", '#mod_tokens_token_object'],
+  visual_number: ['OCPI Token.visual_number: the readable number printed on the card. Optional, and may be the same as the contract ID. string(64).', '#mod_tokens_token_object'],
+  group_id: ['OCPI Token.group_id: groups tokens so they act as one, e.g. a card and a key fob for the same driver, so a session started with one can be stopped with the other. This app also uses it as a category filter. Optional, CiString(36). OCPP 1.5/1.6 chargers only support 20 characters.', '#mod_tokens_token_object'],
+  whitelist: ["OCPI Token.whitelist (WhitelistType): when the CPO may decide without asking us. NEVER: always ask us in real time (this app's default). ALLOWED_OFFLINE: ask in real time, but allow the token if we can't be reached. ALLOWED: the CPO may use either. ALWAYS: whitelist only, never asked in real time.", '#mod_tokens_whitelisttype_enum'],
+  valid: ["OCPI Token.valid: whether the token is valid. A real-time authorize returns ALLOWED for a valid token and BLOCKED for an invalid one. It doesn't change whether the CPO asks us; the whitelist setting decides that.", '#mod_tokens_token_object'],
+};
+function help(field) {
+  const [text, anchor] = FIELD_HELP[field];
+  return { open: false, text, url: SPEC + anchor };
+}
+
+function app() {
+  return {
+    tab: 'tokens',
+    types: ['RFID', 'APP_USER', 'AD_HOC_USER', 'OTHER'],
+    whitelists: ['NEVER', 'ALLOWED', 'ALLOWED_OFFLINE', 'ALWAYS'],
+    tokens: [], total: 0, offset: 0, limit: 50,
+    filters: { q: '', type: '', group_id: '', valid: '' },
+    groups: [], form: null, error: '',
+    partners: [], newPartner: '', connectForm: { name: '', versions_url: '', token: '' }, busy: false, result: null,
+    authTest: { partner_id: '', uid: '', type: 'RFID' }, authResult: '',
+    info: {},
+    messages: [], lastId: 0, paused: false, logPartner: '', selected: null,
+
+    init() {
+      this.load();
+      this.loadGroups();
+      this.loadPartners();
+      this.reloadMessages();
+      this.api('/api/info').then(info => this.info = info);
+      setInterval(() => { if (this.tab === 'log' && !this.paused) this.pollMessages(); }, 1500);
+    },
+
+    async api(path, opts = {}) {
+      const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        this.error = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? res.statusText);
+        throw new Error(this.error);
+      }
+      return res.status === 204 ? null : res.json();
+    },
+
+    // Tokens
+    async load() {
+      const params = new URLSearchParams({ offset: this.offset, limit: this.limit });
+      for (const [k, v] of Object.entries(this.filters)) if (v !== '') params.set(k, v);
+      const page = await this.api('/api/tokens?' + params);
+      this.tokens = page.items;
+      this.total = page.total;
+    },
+    search() { this.offset = 0; this.load(); },
+    page(delta) { this.offset = Math.max(0, this.offset + delta * this.limit); this.load(); },
+    async loadGroups() { this.groups = await this.api('/api/tokens/groups'); },
+    edit(token) {
+      this.form = token ? { ...token } : { uid: '', type: 'RFID', contract_id: '', visual_number: '', group_id: '', whitelist: 'NEVER', valid: true };
+      this.$refs.dialog.showModal();
+    },
+    async save() {
+      const { id, last_updated, ...body } = this.form;
+      for (const k of ['visual_number', 'group_id']) if (!body[k]) body[k] = null;
+      await this.api(id ? `/api/tokens/${id}` : '/api/tokens', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+      this.$refs.dialog.close();
+      this.load();
+      this.loadGroups();
+    },
+    async toggle(token) {
+      await this.api(`/api/tokens/${token.id}`, { method: 'PATCH', body: JSON.stringify({ valid: !token.valid }) });
+      this.load();
+    },
+    async remove(token) {
+      if (!confirm(`Delete token ${token.uid}?`)) return;
+      await this.api(`/api/tokens/${token.id}`, { method: 'DELETE' });
+      this.load();
+    },
+
+    // Partners
+    async loadPartners() { this.partners = await this.api('/api/partners'); },
+    partnerName(id) { return this.partners.find(p => p.id === id)?.name ?? '—'; },
+    async addPartner() {
+      await this.api('/api/partners', { method: 'POST', body: JSON.stringify({ name: this.newPartner }) });
+      this.newPartner = '';
+      this.loadPartners();
+    },
+    async connect() {
+      this.busy = true;
+      try {
+        await this.api('/api/partners/connect', { method: 'POST', body: JSON.stringify(this.connectForm) });
+        this.connectForm = { name: '', versions_url: '', token: '' };
+        this.result = { ok: true, detail: 'Connected and registered' };
+      } finally {
+        this.busy = false;
+        this.loadPartners();
+      }
+    },
+    async partnerAction(p, action) {
+      this.result = { ok: true, detail: `${action}: ${p.name}…` };
+      try {
+        const res = await this.api(`/api/partners/${p.id}/${action}`, { method: 'POST' });
+        this.result = action === 'test' ? res : { ok: true, detail: `${action} succeeded for ${p.name}` };
+      } catch (e) {
+        this.result = { ok: false, detail: e.message };
+      }
+      this.loadPartners();
+    },
+    async removePartner(p) {
+      if (!confirm(`Delete partner ${p.name}? We'll unregister with them first if we can.`)) return;
+      await this.api(`/api/partners/${p.id}`, { method: 'DELETE' });
+      this.loadPartners();
+    },
+    async testAuthorize() {
+      const { partner_id, ...body } = this.authTest;
+      const res = await this.api(`/api/partners/${partner_id}/test-authorize`, { method: 'POST', body: JSON.stringify(body) });
+      this.authResult = JSON.stringify(res, null, 2);
+    },
+
+    // Live log
+    async fetchMessages(afterId) {
+      const params = new URLSearchParams({ after_id: afterId, limit: 200 });
+      if (this.logPartner) params.set('partner_id', this.logPartner);
+      return this.api('/api/messages?' + params);
+    },
+    async reloadMessages() {
+      const rows = await this.fetchMessages(0);
+      this.messages = rows.reverse();
+      this.lastId = this.messages[0]?.id ?? 0;
+    },
+    async pollMessages() {
+      const rows = await this.fetchMessages(this.lastId);
+      if (!rows.length) return;
+      this.lastId = rows[rows.length - 1].id;
+      this.messages = [...rows.reverse(), ...this.messages].slice(0, 500);
+    },
+    async clearMessages() {
+      await this.api('/api/messages', { method: 'DELETE' });
+      this.messages = [];
+      this.selected = null;
+    },
+    path(url) { const u = new URL(url); return u.pathname + u.search; },
+    pretty(value) {
+      if (value == null) return '';
+      if (typeof value !== 'string') return JSON.stringify(value, null, 2);
+      try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
+    },
+  };
+}
+</script>
+</body>
+</html>
