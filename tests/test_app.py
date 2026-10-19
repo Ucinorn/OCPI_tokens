@@ -90,3 +90,19 @@ def test_messages_are_logged(client):
 
     newer = client.get("/api/messages", params={"after_id": last["id"]}).json()
     assert newer == []
+
+
+def test_admin_basic_auth(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "admin_password", "secret")
+    for path in ("/", "/api/tokens", "/docs"):
+        res = client.get(path)
+        assert res.status_code == 401
+        assert res.headers["WWW-Authenticate"].startswith("Basic")
+    assert client.get("/api/tokens", auth=("admin", "wrong")).status_code == 401
+    assert client.get("/api/tokens", headers={"Authorization": "Basic !!!"}).status_code == 401
+    assert client.get("/api/tokens", auth=("admin", "secret")).status_code == 200
+    assert client.get("/", auth=("admin", "secret")).status_code == 200
+    # OCPI keeps its own token auth: no Basic challenge there
+    assert "WWW-Authenticate" not in client.get("/ocpi/versions").headers

@@ -35,6 +35,13 @@ python scripts/e2e.py                     # full end-to-end check against the mo
 | `mock_cpms/` | Mock CPMS (an OCPI CPO) with its own credentials, used for end-to-end testing |
 | `scripts/e2e.py` | Drives the app and the mock through every flow, and prints PASS/FAIL |
 
+## Admin auth
+
+Set `ADMIN_PASSWORD` (and optionally `ADMIN_USERNAME`, default `admin`) to put HTTP Basic auth on the UI,
+`/api` and `/docs`. The browser prompts once and re-sends the credentials on the UI's `/api` calls.
+`/ocpi/*` is left out, since CPMSs authenticate there with their OCPI tokens. Use HTTPS in front of it,
+because Basic auth sends the password in every request.
+
 ## Connecting a CPMS
 
 Either side can start the credentials handshake. Both options are on the **Partners** tab.

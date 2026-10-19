@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     party_id: str = "XXX"
     business_name: str = "OCPI Tokens"
     issuer: str = "OCPI Tokens"  # default Token.issuer for new tokens
+    admin_username: str = "admin"  # HTTP Basic auth for the UI and /api (not /ocpi)
+    admin_password: str = ""  # empty disables the auth
 
 
 settings = Settings()

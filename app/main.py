@@ -1,4 +1,7 @@
+import base64
+import binascii
 import logging
+import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -42,6 +45,28 @@ async def validation_error(request: Request, exc: RequestValidationError):
     if request.url.path.startswith("/ocpi"):
         return ocpi_response(status_code=2001, message=str(exc.errors()), http_status=400)
     return await request_validation_exception_handler(request, exc)
+
+
+def _basic_auth_ok(header: str) -> bool:
+    scheme, _, encoded = header.partition(" ")
+    if scheme.lower() != "basic":
+        return False
+    try:
+        username, _, password = base64.b64decode(encoded).decode().partition(":")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    return (secrets.compare_digest(username.encode(), settings.admin_username.encode())
+            & secrets.compare_digest(password.encode(), settings.admin_password.encode()))
+
+
+@app.middleware("http")
+async def admin_auth(request: Request, call_next):
+    """HTTP Basic auth on everything except /ocpi, which CPMSs reach with their OCPI tokens."""
+    if not settings.admin_password or request.url.path.startswith("/ocpi"):
+        return await call_next(request)
+    if not _basic_auth_ok(request.headers.get("Authorization", "")):
+        return Response("Unauthorized", status_code=401, headers={"WWW-Authenticate": 'Basic realm="OCPI Tokens"'})
+    return await call_next(request)
 
 
 @app.middleware("http")

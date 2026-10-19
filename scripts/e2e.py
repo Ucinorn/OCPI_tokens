@@ -2,10 +2,13 @@
 
     python scripts/e2e.py [APP_URL] [MOCK_URL]     # defaults: http://localhost:8000 http://localhost:8001
 
+Set ADMIN_USERNAME / ADMIN_PASSWORD if the app has Basic auth turned on.
+
 Runs both registration directions, real-time authorize (allowed, blocked, unknown, bad token),
 token list pull, credential rotation and unregistering. Cleans up after itself. Exits 1 on any failure.
 """
 
+import os
 import secrets
 import sys
 
@@ -13,7 +16,8 @@ import httpx
 
 APP = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
 MOCK = sys.argv[2] if len(sys.argv) > 2 else "http://localhost:8001"
-app = httpx.Client(base_url=APP, timeout=30)
+ADMIN_AUTH = (os.environ.get("ADMIN_USERNAME", "admin"), os.environ["ADMIN_PASSWORD"]) if os.environ.get("ADMIN_PASSWORD") else None
+app = httpx.Client(base_url=APP, timeout=30, auth=ADMIN_AUTH)
 mock = httpx.Client(base_url=MOCK, timeout=30)
 failures = 0
 
