@@ -143,7 +143,7 @@
       <form @submit.prevent="testAuthorize()" class="grid">
         <select x-model="authTest.partner_id" required>
           <option value="">Partner…</option>
-          <template x-for="p in partners.filter(p => p.registered_at)"><option :value="p.id" x-text="p.name"></option></template>
+          <template x-for="p in partners" :key="p.id"><option :value="p.id" :disabled="!p.registered_at" x-text="p.registered_at ? p.name : `${p.name} (not registered yet)`"></option></template>
         </select>
         <input placeholder="Token UID" x-model="authTest.uid" required>
         <select x-model="authTest.type"><template x-for="t in types"><option x-text="t"></option></template></select>
@@ -257,6 +257,8 @@ function app() {
       this.reloadMessages();
       this.api('/api/info').then(info => this.info = info);
       setInterval(() => { if (this.tab === 'log' && !this.paused) this.pollMessages(); }, 1500);
+      // Pick up registrations the CPMS completes in the background.
+      setInterval(() => { if (this.tab === 'partners') this.loadPartners(); }, 3000);
     },
 
     async api(path, opts = {}) {
