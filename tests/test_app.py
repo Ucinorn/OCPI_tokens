@@ -2,11 +2,13 @@ import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.ocpi import credentials
+from app.ocpi.client import TokenAuth
 from app.ocpi.common import encode_token
 
 
@@ -48,6 +50,32 @@ def test_token_crud(client):
 def test_ocpi_requires_auth(client):
     res = client.post("/ocpi/2.2.1/tokens/ANY/authorize")
     assert res.status_code == 401
+
+
+def test_accepts_raw_and_base64_tokens(client):
+    token_a = client.post("/api/partners", json={"name": "CPMS"}).json()["token_a"]
+    assert client.get("/ocpi/versions", headers={"Authorization": f"Token {token_a}"}).status_code == 200
+    assert client.get("/ocpi/versions", headers={"Authorization": encode_token(token_a)}).status_code == 200
+    token_c = client.post(
+        "/ocpi/2.2.1/credentials",
+        headers={"Authorization": f"Token {token_a}"},
+        json={"token": "their-token-b", "url": "https://cpms.example/ocpi/versions", "roles": []},
+    ).json()["data"]["token"]
+    assert client.get("/ocpi/2.2.1/credentials", headers={"Authorization": f"Token {token_c}"}).status_code == 200
+    assert client.get("/ocpi/2.2.1/credentials", headers={"Authorization": encode_token(token_c)}).status_code == 200
+
+
+def test_outbound_retries_with_raw_token():
+    sent = []
+
+    def handler(request):
+        sent.append(request.headers["Authorization"])
+        return httpx.Response(200 if request.headers["Authorization"] == "Token raw-token" else 401)
+
+    with httpx.Client(auth=TokenAuth("raw-token"), transport=httpx.MockTransport(handler)) as c:
+        assert c.get("https://cpms.example/versions").status_code == 200
+        assert c.get("https://cpms.example/2.2.1").status_code == 200
+    assert sent == [encode_token("raw-token"), "Token raw-token", "Token raw-token"]
 
 
 def test_realtime_authorize(client):

@@ -42,8 +42,24 @@ class LoggingTransport(httpx.BaseTransport):
         self.inner.close()
 
 
+class TokenAuth(httpx.Auth):
+    """Base64 token per 2.2.1; on 401/403 retry once with it raw, and stick with raw for the rest of this client."""
+
+    def __init__(self, token: str):
+        self.token = token
+        self.raw = False
+
+    def auth_flow(self, request: httpx.Request):
+        request.headers["Authorization"] = f"Token {self.token}" if self.raw else encode_token(self.token)
+        response = yield request
+        if response.status_code in (401, 403) and not self.raw:
+            request.headers["Authorization"] = f"Token {self.token}"
+            response = yield request
+            self.raw = response.status_code not in (401, 403)
+
+
 def client(partner_id: int | None, token: str) -> httpx.Client:
-    return httpx.Client(timeout=10, headers={"Authorization": encode_token(token)}, transport=LoggingTransport(partner_id))
+    return httpx.Client(timeout=10, auth=TokenAuth(token), transport=LoggingTransport(partner_id))
 
 
 def data(response: httpx.Response):
