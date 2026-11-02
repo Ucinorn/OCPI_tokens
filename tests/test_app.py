@@ -104,6 +104,24 @@ def test_realtime_authorize(client):
     assert 'rel="next"' in listing.headers["Link"]
 
 
+def test_authorize_ignores_type_mismatch(client):
+    auth = {"Authorization": encode_token(register(client))}
+    client.post("/api/tokens", json={"uid": "TYPE-OK", "contract_id": "C1"})
+    client.post("/api/tokens", json={"uid": "TYPE-BLOCKED", "contract_id": "C2", "valid": False})
+
+    ok = client.post("/ocpi/2.2.1/tokens/TYPE-OK/authorize?type=OTHER", headers=auth).json()
+    assert ok["data"]["allowed"] == "ALLOWED"
+    assert ok["data"]["token"]["type"] == "RFID"  # returned as stored
+
+    blocked = client.post("/ocpi/2.2.1/tokens/TYPE-BLOCKED/authorize?type=OTHER", headers=auth).json()
+    assert blocked["data"]["allowed"] == "BLOCKED"
+
+    # a uid stored under several types: the requested type wins
+    client.post("/api/tokens", json={"uid": "TYPE-OK", "contract_id": "C3", "type": "OTHER", "valid": False})
+    assert client.post("/ocpi/2.2.1/tokens/TYPE-OK/authorize?type=OTHER", headers=auth).json()["data"]["allowed"] == "BLOCKED"
+    assert client.post("/ocpi/2.2.1/tokens/TYPE-OK/authorize?type=RFID", headers=auth).json()["data"]["allowed"] == "ALLOWED"
+
+
 def test_messages_are_logged(client):
     client.delete("/api/messages")
     auth = {"Authorization": encode_token(register(client)), "X-Request-ID": "req-1"}

@@ -53,7 +53,10 @@ def authorize(
     location: LocationReferences | None = Body(None),  # accepted per spec, not used for the decision
     db: Session = Depends(get_db),
 ):
-    token = db.scalar(select(Token).where(Token.uid_key == token_uid.upper(), Token.type == type))
+    # The decision only depends on uid and valid. type just picks the row if a uid is stored under several types.
+    token = db.scalar(
+        select(Token).where(Token.uid_key == token_uid.upper()).order_by(Token.type != type, Token.id).limit(1)
+    )
     if token is None:
         raise OcpiError(2004, "Unknown Token", 404)
     return ocpi_response({"allowed": "ALLOWED" if token.valid else "BLOCKED", "token": ocpi_token(token)})

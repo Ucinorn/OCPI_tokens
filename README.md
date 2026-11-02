@@ -58,7 +58,9 @@ Partner actions:
 - **Delete:** unregisters with them, then removes the partner locally.
 - **Test authorize:** sends the real `POST /ocpi/2.2.1/tokens/{uid}/authorize` to our own `BASE_URL`
   using a partner's token, the same call the CPMS makes. The reply is `ALLOWED` when the token is valid,
-  `BLOCKED` when it is invalid, and HTTP 404 / `2004 Unknown Token` when it is not found.
+  `BLOCKED` when it is invalid, and HTTP 404 / `2004 Unknown Token` when it is not found. The token is
+  found by UID alone, so the requested type doesn't have to match. If a UID is stored under several types,
+  the row with the requested type is used.
 
 ## Message log
 
